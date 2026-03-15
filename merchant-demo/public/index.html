@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>USDT 钱包</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f6fa; color: #333; min-height: 100vh; }
+
+    .app { max-width: 420px; margin: 0 auto; min-height: 100vh; background: #fff; position: relative; }
+
+    /* 登录页 */
+    .login-page { padding: 60px 24px; text-align: center; }
+    .login-page h1 { font-size: 28px; color: #2d3436; margin-bottom: 8px; }
+    .login-page p { color: #636e72; margin-bottom: 32px; }
+    .form-group { margin-bottom: 16px; }
+    .form-group input { width: 100%; height: 48px; border: 1px solid #ddd; border-radius: 12px; padding: 0 16px; font-size: 15px; outline: none; transition: border-color .2s; }
+    .form-group input:focus { border-color: #0984e3; }
+    .btn { width: 100%; height: 48px; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; transition: opacity .2s; }
+    .btn:active { opacity: .7; }
+    .btn-primary { background: linear-gradient(135deg, #0984e3, #6c5ce7); color: #fff; }
+    .btn-outline { background: transparent; color: #0984e3; border: 1px solid #0984e3; margin-top: 12px; }
+
+    /* 主页 */
+    .main-page { display: none; }
+    .header { background: linear-gradient(135deg, #0984e3, #6c5ce7); color: #fff; padding: 24px; padding-top: 40px; border-radius: 0 0 24px 24px; }
+    .header .greeting { font-size: 14px; opacity: .8; }
+    .header .balance-label { font-size: 13px; margin-top: 16px; opacity: .7; }
+    .header .balance { font-size: 36px; font-weight: 700; margin-top: 4px; }
+    .header .balance span { font-size: 16px; font-weight: 400; margin-left: 4px; }
+    .header .logout { position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,.2); border: none; color: #fff; padding: 6px 12px; border-radius: 8px; font-size: 12px; cursor: pointer; }
+
+    .actions { display: flex; gap: 12px; padding: 20px 24px; margin-top: -20px; }
+    .action-btn { flex: 1; background: #fff; border: none; border-radius: 16px; padding: 16px; text-align: center; box-shadow: 0 2px 12px rgba(0,0,0,.08); cursor: pointer; transition: transform .15s; }
+    .action-btn:active { transform: scale(.96); }
+    .action-btn .icon { font-size: 28px; margin-bottom: 6px; }
+    .action-btn .label { font-size: 13px; color: #636e72; }
+
+    /* 面板 */
+    .panel { display: none; padding: 20px 24px; }
+    .panel.active { display: block; }
+    .panel-title { font-size: 18px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .panel-title .back { cursor: pointer; font-size: 20px; }
+
+    .chain-select { display: flex; gap: 12px; margin-bottom: 20px; }
+    .chain-btn { flex: 1; padding: 14px; border: 2px solid #ddd; border-radius: 12px; text-align: center; cursor: pointer; font-weight: 600; transition: all .2s; background: #fff; }
+    .chain-btn.active { border-color: #0984e3; background: #ebf5ff; color: #0984e3; }
+
+    .address-box { background: #f8f9fa; border-radius: 12px; padding: 16px; text-align: center; margin-bottom: 16px; }
+    .address-box .addr { font-family: monospace; font-size: 13px; word-break: break-all; margin: 12px 0; color: #2d3436; line-height: 1.6; }
+    .copy-btn { background: #0984e3; color: #fff; border: none; padding: 8px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+
+    .withdraw-form { margin-top: 8px; }
+    .withdraw-form .form-group label { display: block; font-size: 13px; color: #636e72; margin-bottom: 6px; }
+    .withdraw-form .form-group input { height: 44px; }
+    .balance-hint { font-size: 12px; color: #0984e3; margin-top: 4px; cursor: pointer; }
+
+    /* 记录 */
+    .record-item { padding: 14px 0; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+    .record-item .left .type { font-weight: 600; font-size: 14px; }
+    .record-item .left .time { font-size: 12px; color: #999; margin-top: 4px; }
+    .record-item .left .chain { font-size: 11px; color: #fff; background: #0984e3; padding: 1px 6px; border-radius: 4px; margin-left: 6px; }
+    .record-item .right .amount { font-size: 16px; font-weight: 600; }
+    .record-item .right .amount.in { color: #00b894; }
+    .record-item .right .amount.out { color: #d63031; }
+    .record-item .right .status { font-size: 11px; color: #999; text-align: right; margin-top: 2px; }
+    .empty { text-align: center; color: #999; padding: 40px 0; }
+
+    .toast { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,.75); color: #fff; padding: 12px 24px; border-radius: 8px; font-size: 14px; z-index: 999; display: none; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <!-- 登录/注册 -->
+  <div id="loginPage" class="login-page">
+    <h1>USDT Wallet</h1>
+    <p>安全便捷的数字资产钱包</p>
+    <div class="form-group"><input id="loginUser" placeholder="用户名" autocomplete="off"></div>
+    <div class="form-group"><input id="loginPass" type="password" placeholder="密码"></div>
+    <button class="btn btn-primary" onclick="doLogin()">登 录</button>
+    <button class="btn btn-outline" onclick="doRegister()">注册新账户</button>
+  </div>
+
+  <!-- 主页 -->
+  <div id="mainPage" class="main-page">
+    <div class="header" style="position:relative;">
+      <button class="logout" onclick="doLogout()">退出</button>
+      <div class="greeting">Hello, <span id="userName"></span></div>
+      <div class="balance-label">可用余额 (USDT)</div>
+      <div class="balance"><span id="userBalance">0.00</span><span>USDT</span></div>
+    </div>
+
+    <div class="actions">
+      <div class="action-btn" onclick="showPanel('deposit')">
+        <div class="icon">💰</div>
+        <div class="label">充值</div>
+      </div>
+      <div class="action-btn" onclick="showPanel('withdraw')">
+        <div class="icon">💸</div>
+        <div class="label">提币</div>
+      </div>
+      <div class="action-btn" onclick="showPanel('records')">
+        <div class="icon">📋</div>
+        <div class="label">记录</div>
+      </div>
+    </div>
+
+    <!-- 充值面板 -->
+    <div id="depositPanel" class="panel">
+      <div class="panel-title"><span class="back" onclick="hidePanel()">←</span> 充值 USDT</div>
+      <div class="chain-select">
+        <div class="chain-btn active" data-chain="trc20" onclick="selectChain(this,'trc20')">TRC20</div>
+        <div class="chain-btn" data-chain="bsc" onclick="selectChain(this,'bsc')">BSC (BEP20)</div>
+      </div>
+      <div id="addressArea">
+        <div style="text-align:center;color:#999;padding:20px;">选择链后自动生成充值地址</div>
+      </div>
+      <div style="margin-top:16px;padding:12px;background:#fff3cd;border-radius:8px;font-size:12px;color:#856404;">
+        <b>注意：</b>请仅向该地址转入对应链的 USDT，其他币种将无法找回。充值到账后余额自动更新。
+      </div>
+    </div>
+
+    <!-- 提币面板 -->
+    <div id="withdrawPanel" class="panel">
+      <div class="panel-title"><span class="back" onclick="hidePanel()">←</span> 提币 USDT</div>
+      <div class="chain-select">
+        <div class="chain-btn active" data-chain="trc20" onclick="selectWithdrawChain(this,'trc20')">TRC20</div>
+        <div class="chain-btn" data-chain="bsc" onclick="selectWithdrawChain(this,'bsc')">BSC (BEP20)</div>
+      </div>
+      <div class="withdraw-form">
+        <div class="form-group">
+          <label>提币地址</label>
+          <input id="withdrawAddr" placeholder="输入收款地址">
+        </div>
+        <div class="form-group">
+          <label>提币金额</label>
+          <input id="withdrawAmount" type="number" placeholder="最低 1 USDT" min="1" step="0.01">
+          <div class="balance-hint" onclick="fillMax()">可用: <span id="withdrawAvail">0</span> USDT（全部提取）</div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:16px;" onclick="doWithdraw()">确认提币</button>
+      </div>
+    </div>
+
+    <!-- 记录面板 -->
+    <div id="recordsPanel" class="panel">
+      <div class="panel-title"><span class="back" onclick="hidePanel()">←</span> 交易记录</div>
+      <div id="recordList"><div class="empty">暂无记录</div></div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+let currentUser = null;
+let selectedChain = 'trc20';
+let withdrawChain = 'trc20';
+
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 2000);
+}
+
+async function post(url, data) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+  return res.json();
+}
+
+async function doRegister() {
+  const username = document.getElementById('loginUser').value.trim();
+  const password = document.getElementById('loginPass').value.trim();
+  if (!username || !password) return toast('请输入用户名和密码');
+  const res = await post('/api/register', { username, password });
+  toast(res.msg);
+}
+
+async function doLogin() {
+  const username = document.getElementById('loginUser').value.trim();
+  const password = document.getElementById('loginPass').value.trim();
+  if (!username || !password) return toast('请输入用户名和密码');
+  const res = await post('/api/login', { username, password });
+  if (res.code !== 0) return toast(res.msg);
+  currentUser = res.data;
+  localStorage.setItem('user', JSON.stringify(currentUser));
+  enterMain();
+}
+
+function doLogout() {
+  currentUser = null;
+  localStorage.removeItem('user');
+  document.getElementById('loginPage').style.display = 'block';
+  document.getElementById('mainPage').style.display = 'none';
+}
+
+function enterMain() {
+  document.getElementById('loginPage').style.display = 'none';
+  document.getElementById('mainPage').style.display = 'block';
+  document.getElementById('userName').textContent = currentUser.username;
+  refreshBalance();
+}
+
+async function refreshBalance() {
+  const res = await fetch('/api/user/' + currentUser.id).then(r => r.json());
+  if (res.code === 0) {
+    currentUser.balance = res.data.balance;
+    document.getElementById('userBalance').textContent = parseFloat(res.data.balance).toFixed(2);
+    document.getElementById('withdrawAvail').textContent = parseFloat(res.data.balance).toFixed(2);
+  }
+}
+
+function showPanel(name) {
+  hidePanel();
+  document.getElementById(name + 'Panel').classList.add('active');
+  if (name === 'deposit') getDepositAddress();
+  if (name === 'records') loadRecords();
+  if (name === 'withdraw') refreshBalance();
+}
+
+function hidePanel() {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+}
+
+function selectChain(el, chain) {
+  selectedChain = chain;
+  el.parentElement.querySelectorAll('.chain-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  getDepositAddress();
+}
+
+function selectWithdrawChain(el, chain) {
+  withdrawChain = chain;
+  el.parentElement.querySelectorAll('.chain-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+}
+
+async function getDepositAddress() {
+  const area = document.getElementById('addressArea');
+  area.innerHTML = '<div style="text-align:center;color:#999;padding:20px;">生成中...</div>';
+  const res = await post('/api/deposit/address', { user_id: currentUser.id, chain_type: selectedChain });
+  if (res.code === 0) {
+    area.innerHTML = `
+      <div class="address-box">
+        <div style="font-size:13px;color:#636e72;">请向以下 ${selectedChain.toUpperCase()} 地址转入 USDT</div>
+        <div class="addr">${res.data.address}</div>
+        <button class="copy-btn" onclick="copyAddr('${res.data.address}')">复制地址</button>
+      </div>`;
+  } else {
+    area.innerHTML = `<div style="text-align:center;color:#d63031;padding:20px;">${res.msg}</div>`;
+  }
+}
+
+function copyAddr(addr) {
+  navigator.clipboard.writeText(addr).then(() => toast('地址已复制')).catch(() => toast('复制失败'));
+}
+
+function fillMax() {
+  document.getElementById('withdrawAmount').value = currentUser.balance;
+}
+
+async function doWithdraw() {
+  const to_address = document.getElementById('withdrawAddr').value.trim();
+  const amount = document.getElementById('withdrawAmount').value;
+  if (!to_address) return toast('请输入提币地址');
+  if (!amount || parseFloat(amount) < 1) return toast('最低提币 1 USDT');
+  const res = await post('/api/withdraw', { user_id: currentUser.id, chain_type: withdrawChain, to_address, amount });
+  toast(res.msg || (res.code === 0 ? '提币申请已提交' : '提币失败'));
+  if (res.code === 0) {
+    document.getElementById('withdrawAddr').value = '';
+    document.getElementById('withdrawAmount').value = '';
+    refreshBalance();
+  }
+}
+
+async function loadRecords() {
+  const res = await fetch('/api/transactions/' + currentUser.id).then(r => r.json());
+  const list = document.getElementById('recordList');
+  if (!res.data || res.data.length === 0) {
+    list.innerHTML = '<div class="empty">暂无记录</div>';
+    return;
+  }
+  list.innerHTML = res.data.map(tx => `
+    <div class="record-item">
+      <div class="left">
+        <div class="type">${tx.type === 'deposit' ? '充值' : '提币'}<span class="chain">${(tx.chain_type || '').toUpperCase()}</span></div>
+        <div class="time">${tx.created_at || ''}</div>
+      </div>
+      <div class="right">
+        <div class="amount ${tx.type === 'deposit' ? 'in' : 'out'}">${tx.type === 'deposit' ? '+' : '-'}${parseFloat(tx.amount).toFixed(2)}</div>
+        <div class="status">${tx.status === 'success' ? '成功' : tx.status === 'failed' ? '失败' : '处理中'}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// 自动登录
+const saved = localStorage.getItem('user');
+if (saved) {
+  currentUser = JSON.parse(saved);
+  enterMain();
+}
+
+// 定时刷新余额
+setInterval(() => { if (currentUser) refreshBalance(); }, 10000);
+</script>
+</body>
+</html>
