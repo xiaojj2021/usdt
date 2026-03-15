@@ -195,9 +195,10 @@ const rescanDeposits = async () => {
     try {
       if (addr.chain_type === 'trc20') {
         const contract = process.env.TRC20_USDT_CONTRACT || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+        const trongridKey = (() => { try { const r = db.prepare(`SELECT config_value FROM system_config WHERE config_key = ?`).get('trongrid_api_key'); return r?.config_value || process.env.TRON_API_KEY || ''; } catch { return process.env.TRON_API_KEY || ''; } })();
         const { data } = await axios.get('https://api.trongrid.io/v1/accounts/' + addr.address + '/transactions/trc20', {
           params: { only_to: true, limit: 50, contract_address: contract },
-          headers: { 'TRON-PRO-API-KEY': process.env.TRON_API_KEY || '' },
+          headers: { 'TRON-PRO-API-KEY': trongridKey },
           timeout: 15000,
         });
         const txs = data?.data || [];

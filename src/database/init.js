@@ -213,6 +213,7 @@ async function main() {
     ['withdraw_max_amount', '50000', '单笔提币最大金额'],
     ['withdraw_daily_limit', '200000', '每日提币限额'],
     ['blacklist_addresses', '[]', '黑名单地址（JSON数组）'],
+    ['trongrid_api_key', '', 'TronGrid API Key（必填，用于 TRC20 链上交互）'],
     ['fee_payer', 'platform', '手续费承担方：platform/merchant'],
     ['trc20_confirm_blocks', '1', 'TRC20 确认区块数'],
     ['bsc_confirm_blocks', '15', 'BSC 确认区块数'],

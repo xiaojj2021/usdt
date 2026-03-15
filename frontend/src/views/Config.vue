@@ -146,11 +146,21 @@
         <el-card shadow="hover" class="config-card">
           <template #header>
             <div class="card-header">
-              <span class="card-title">黑名单地址</span>
-              <el-tag size="small" type="danger" effect="plain">安全</el-tag>
+              <span class="card-title">TronGrid API Key</span>
+              <el-tag size="small" type="warning" effect="plain">必填</el-tag>
             </div>
           </template>
-          <el-input v-model="configs.blacklist_addresses" type="textarea" :rows="8" placeholder='JSON 数组格式，如：["addr1", "addr2"]' style="font-family: monospace;" />
+          <el-form label-width="130px" label-position="right">
+            <el-form-item label="API Key">
+              <el-input v-model="configs.trongrid_api_key" placeholder="填入 TronGrid API Key" clearable show-password />
+            </el-form-item>
+            <el-form-item>
+              <div style="color: #909399; font-size: 12px; line-height: 1.6;">
+                <p style="margin: 0;">TRC20 链上扫描、余额查询、转账等操作需要此 Key。</p>
+                <p style="margin: 4px 0 0;">免费申请：<a href="https://www.trongrid.io" target="_blank" style="color: #409eff;">www.trongrid.io</a>（每日 100,000 次请求）</p>
+              </div>
+            </el-form-item>
+          </el-form>
         </el-card>
       </el-col>
     </el-row>

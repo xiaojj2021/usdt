@@ -9,6 +9,15 @@ const db = require('../database/db');
 
 let tronWebInstance = null;
 
+const getTronGridApiKey = () => {
+  try {
+    const row = db.prepare(`SELECT config_value FROM system_config WHERE config_key = ?`).get('trongrid_api_key');
+    return row?.config_value || process.env.TRON_API_KEY || '';
+  } catch {
+    return process.env.TRON_API_KEY || '';
+  }
+};
+
 const getTronWeb = () => {
   if (tronWebInstance) return tronWebInstance;
 
@@ -17,7 +26,7 @@ const getTronWeb = () => {
 
   tronWebInstance = new TronWeb({
     fullHost,
-    headers: { 'TRON-PRO-API-KEY': process.env.TRON_API_KEY || '' },
+    headers: { 'TRON-PRO-API-KEY': getTronGridApiKey() },
   });
 
   return tronWebInstance;
@@ -28,7 +37,7 @@ const createFreshTronWeb = () => {
   const fullHost = configRow?.config_value || process.env.TRON_FULL_HOST || 'https://api.trongrid.io';
   return new TronWeb({
     fullHost,
-    headers: { 'TRON-PRO-API-KEY': process.env.TRON_API_KEY || '' },
+    headers: { 'TRON-PRO-API-KEY': getTronGridApiKey() },
   });
 };
 
@@ -111,7 +120,7 @@ const transferUSDT = async (privateKey, toAddress, amount) => {
 const getRpcConfig = () => {
   const configRow = db.prepare(`SELECT config_value FROM system_config WHERE config_key = ?`).get('trc20_rpc_url');
   const host = configRow?.config_value || process.env.TRON_FULL_HOST || 'https://api.trongrid.io';
-  const apiKey = process.env.TRON_API_KEY || '';
+  const apiKey = getTronGridApiKey();
   return { host, apiKey };
 };
 

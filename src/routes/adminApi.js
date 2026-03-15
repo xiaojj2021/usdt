@@ -495,6 +495,10 @@ router.post('/config/update', (req, res) => {
     const { configs } = req.body;
     if (!configs || !configs.length) return res.json(error('缺少配置数据'));
     configService.batchUpdate(configs);
+    const hasTronGridKey = configs.some(c => c.key === 'trongrid_api_key');
+    if (hasTronGridKey) {
+      try { require('../chain').trc20.resetInstance(); } catch {}
+    }
     logService.write('operate', '系统配置', '更新', JSON.stringify(configs), req.ip, req.admin.username);
     res.json(success(null, '配置更新成功'));
   } catch (err) {

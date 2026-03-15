@@ -40,6 +40,14 @@ async function startServer() {
     logger.info('[迁移] 充币扫描间隔已更新为 60 秒（节约 TronGrid 额度）');
   }
 
+  // 自动插入 TronGrid API Key 配置（如果不存在）
+  const trongridExisting = db.prepare('SELECT id FROM system_config WHERE config_key = ?').get('trongrid_api_key');
+  if (!trongridExisting) {
+    const envKey = process.env.TRON_API_KEY || '';
+    db.prepare('INSERT INTO system_config (config_key, config_value, description) VALUES (?, ?, ?)').run('trongrid_api_key', envKey, 'TronGrid API Key（必填，用于 TRC20 链上交互）');
+    if (envKey) logger.info('[迁移] 已将环境变量 TRON_API_KEY 迁移到数据库配置');
+  }
+
   // 自动插入 feee.io 能量配置（如果不存在）
   const feeeConfigs = [
     ['feee_energy_enabled', '1', '能量租赁开关：1启用/0关闭'],
