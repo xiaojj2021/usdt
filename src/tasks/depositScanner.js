@@ -9,6 +9,11 @@ const callbackService = require('../services/callbackService');
 const configService = require('../services/configService');
 const logger = require('../utils/logger');
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+const MAX_BLOCKS_PER_SCAN = 50;
+const TRC20_BLOCK_DELAY_MS = 200;
+
 /**
  * 扫描 TRC20 链上充币
  */
@@ -23,11 +28,25 @@ const scanTRC20 = async () => {
     const confirmBlocks = parseInt(configService.get('trc20_confirm_blocks') || '1');
     const safeBlock = currentBlock - confirmBlocks;
 
-    if (lastBlock >= safeBlock) return;
+    if (lastBlock >= safeBlock) {
+      logger.deposit.info('TRC20 无新区块', { lastBlock, currentBlock, safeBlock });
+      return;
+    }
 
-    logger.info('[TRC20扫描] 开始', { from: lastBlock + 1, to: safeBlock });
+    const totalGap = safeBlock - lastBlock;
+    const scanTo = Math.min(lastBlock + MAX_BLOCKS_PER_SCAN, safeBlock);
+    const blocksToScan = scanTo - lastBlock;
 
-    for (let blockNum = lastBlock + 1; blockNum <= safeBlock; blockNum++) {
+    logger.deposit.info('TRC20 扫描开始', {
+      from: lastBlock + 1,
+      to: scanTo,
+      blocks: blocksToScan,
+      behind: totalGap > MAX_BLOCKS_PER_SCAN ? `还剩 ${totalGap - blocksToScan} 区块待追` : '已追上',
+    });
+    logger.chain.info('TRC20 区块范围', { current: currentBlock, safe: safeBlock, confirm: confirmBlocks });
+
+    let foundCount = 0;
+    for (let blockNum = lastBlock + 1; blockNum <= scanTo; blockNum++) {
       const transfers = await chain.trc20.getBlockTransfers(blockNum);
 
       for (const tx of transfers) {
@@ -35,6 +54,14 @@ const scanTRC20 = async () => {
         if (!walletInfo) continue;
 
         if (depositService.existsByTxid(tx.txid)) continue;
+
+        logger.deposit.info('TRC20 发现充币', {
+          block: blockNum,
+          address: tx.toAddress,
+          amount: tx.amount,
+          txid: tx.txid,
+          merchant: walletInfo.merchant_id,
+        });
 
         depositService.create({
           address: tx.toAddress,
@@ -46,9 +73,11 @@ const scanTRC20 = async () => {
         });
 
         depositService.confirmSuccess(tx.txid);
+        foundCount++;
 
         const order = db.prepare('SELECT * FROM deposit_order WHERE txid = ?').get(tx.txid);
         if (order) {
+          logger.callback.info('触发充币回调', { orderNo: order.order_no, txid: tx.txid });
           const result = await callbackService.sendDepositCallback(order);
           depositService.updateCallbackStatus(order.order_no, result ? 1 : 2, 1);
         }
@@ -56,11 +85,13 @@ const scanTRC20 = async () => {
 
       db.prepare(`UPDATE scan_progress SET last_block = ?, update_time = datetime('now','localtime') WHERE chain_type = ?`)
         .run(blockNum, 'trc20');
+
+      await sleep(TRC20_BLOCK_DELAY_MS);
     }
 
-    logger.info('[TRC20扫描] 完成', { scanned: safeBlock - lastBlock });
+    logger.deposit.info('TRC20 扫描完成', { scanned: blocksToScan, found: foundCount });
   } catch (err) {
-    logger.error('[TRC20扫描] 异常', { error: err.message });
+    logger.deposit.error('TRC20 扫描异常', { error: err.message, stack: err.stack?.split('\n')[1]?.trim() });
   }
 };
 
@@ -69,6 +100,8 @@ const scanTRC20 = async () => {
  */
 const scanBSC = async () => {
   try {
+    chain.bsc.resetInstance();
+
     const progressRow = db.prepare('SELECT last_block FROM scan_progress WHERE chain_type = ?').get('bsc');
     let lastBlock = progressRow?.last_block || 0;
 
@@ -78,10 +111,16 @@ const scanBSC = async () => {
     const confirmBlocks = parseInt(configService.get('bsc_confirm_blocks') || '15');
     const safeBlock = currentBlock - confirmBlocks;
 
-    if (lastBlock >= safeBlock) return;
+    if (lastBlock >= safeBlock) {
+      logger.deposit.info('BSC 无新区块', { lastBlock, currentBlock, safeBlock });
+      return;
+    }
 
-    logger.info('[BSC扫描] 开始', { from: lastBlock + 1, to: safeBlock });
+    const blocksToScan = safeBlock - lastBlock;
+    logger.deposit.info('BSC 扫描开始', { from: lastBlock + 1, to: safeBlock, blocks: blocksToScan });
+    logger.chain.info('BSC 区块范围', { current: currentBlock, safe: safeBlock, confirm: confirmBlocks });
 
+    let foundCount = 0;
     const batchSize = 50;
     for (let from = lastBlock + 1; from <= safeBlock; from += batchSize) {
       const to = Math.min(from + batchSize - 1, safeBlock);
@@ -93,6 +132,14 @@ const scanBSC = async () => {
 
         if (depositService.existsByTxid(tx.txid)) continue;
 
+        logger.deposit.info('BSC 发现充币', {
+          block: `${from}-${to}`,
+          address: tx.toAddress,
+          amount: tx.amount,
+          txid: tx.txid,
+          merchant: walletInfo.merchant_id,
+        });
+
         depositService.create({
           address: tx.toAddress,
           chain_type: 'bsc',
@@ -103,9 +150,11 @@ const scanBSC = async () => {
         });
 
         depositService.confirmSuccess(tx.txid);
+        foundCount++;
 
         const order = db.prepare('SELECT * FROM deposit_order WHERE txid = ?').get(tx.txid);
         if (order) {
+          logger.callback.info('触发充币回调', { orderNo: order.order_no, txid: tx.txid });
           const result = await callbackService.sendDepositCallback(order);
           depositService.updateCallbackStatus(order.order_no, result ? 1 : 2, 1);
         }
@@ -115,22 +164,31 @@ const scanBSC = async () => {
         .run(to, 'bsc');
     }
 
-    logger.info('[BSC扫描] 完成', { scanned: safeBlock - lastBlock });
+    logger.deposit.info('BSC 扫描完成', { scanned: blocksToScan, found: foundCount });
   } catch (err) {
-    logger.error('[BSC扫描] 异常', { error: err.message });
+    const isNetworkErr = err.message?.includes('ECONNRESET') || err.message?.includes('ETIMEDOUT')
+      || err.message?.includes('failed, reason') || err.message?.includes('write after end');
+    if (isNetworkErr) {
+      logger.deposit.warn('BSC 扫描跳过 - 网络不可达', { error: err.message });
+    } else {
+      logger.deposit.error('BSC 扫描异常', { error: err.message, stack: err.stack?.split('\n')[1]?.trim() });
+    }
   }
 };
 
 /**
- * 通过区块浏览器 API 补扫系统地址的历史充币记录（支持手动触发）
+ * 通过区块浏览器 API 补扫系统地址的历史充币记录（仅手动触发）
  */
 const rescanDeposits = async () => {
   const axios = require('axios');
 
   const addresses = db.prepare('SELECT address, chain_type, merchant_id FROM wallet_address WHERE status = 1').all();
-  if (!addresses.length) return { count: 0 };
+  if (!addresses.length) {
+    logger.deposit.info('补扫跳过 - 无活跃地址');
+    return { count: 0 };
+  }
 
-  logger.info('[补扫] 开始检查历史充币', { addressCount: addresses.length });
+  logger.deposit.info('手动补扫开始', { addressCount: addresses.length });
   let totalAdded = 0;
 
   for (const addr of addresses) {
@@ -144,7 +202,6 @@ const rescanDeposits = async () => {
         });
         const txs = data?.data || [];
         for (const tx of txs) {
-          // only_to=true 时返回的均为该地址收款，to 需匹配（兼容大小写）
           const toMatch = !tx.to || tx.to === addr.address || String(tx.to).toLowerCase() === String(addr.address).toLowerCase();
           if (!toMatch) continue;
           const txid = tx.transaction_id;
@@ -160,11 +217,12 @@ const rescanDeposits = async () => {
           });
           depositService.confirmSuccess(txid);
           totalAdded++;
-          logger.info('[补扫] TRC20 充币补录', { address: addr.address, txid, amount });
+          logger.deposit.info('TRC20 补录充币', { address: addr.address, txid, amount });
 
           const order = db.prepare('SELECT * FROM deposit_order WHERE txid = ?').get(txid);
           if (order) await callbackService.sendDepositCallback(order).catch(() => {});
         }
+        await sleep(500);
       } else if (addr.chain_type === 'bsc') {
         const contract = process.env.BSC_USDT_CONTRACT || '0x55d398326f99059fF775485246999027B3197955';
         const { data } = await axios.get('https://api.bscscan.com/api', {
@@ -195,18 +253,18 @@ const rescanDeposits = async () => {
           });
           depositService.confirmSuccess(txid);
           totalAdded++;
-          logger.info('[补扫] BSC 充币补录', { address: addr.address, txid, amount });
+          logger.deposit.info('BSC 补录充币', { address: addr.address, txid, amount });
 
           const order = db.prepare('SELECT * FROM deposit_order WHERE txid = ?').get(txid);
           if (order) await callbackService.sendDepositCallback(order).catch(() => {});
         }
       }
     } catch (err) {
-      logger.error('[补扫] 失败', { address: addr.address, chain_type: addr.chain_type, error: err.message });
+      logger.deposit.error('补扫单地址失败', { address: addr.address, chain: addr.chain_type, error: err.message });
     }
   }
 
-  logger.info('[补扫] 历史充币检查完成', { added: totalAdded });
+  logger.deposit.info('手动补扫完成', { added: totalAdded, addressesChecked: addresses.length });
   return { count: totalAdded };
 };
 

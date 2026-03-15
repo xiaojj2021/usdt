@@ -95,11 +95,17 @@ const getByOrderNo = (orderNo) => {
 };
 
 /**
- * 检查 txid 是否已存在
+ * 检查 txid 是否已存在（包括已删除的）
  */
 const existsByTxid = (txid) => {
   const row = db.prepare('SELECT id FROM deposit_order WHERE txid = ?').get(txid);
-  return !!row;
+  if (row) return true;
+  try {
+    const deleted = db.prepare('SELECT id FROM deleted_txid WHERE txid = ?').get(txid);
+    return !!deleted;
+  } catch (e) {
+    return false;
+  }
 };
 
 module.exports = { create, updateConfirmations, confirmSuccess, updateCallbackStatus, getPendingOrders, getPendingCallbackOrders, list, getByOrderNo, existsByTxid };

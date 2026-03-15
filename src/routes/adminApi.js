@@ -273,13 +273,19 @@ router.post('/deposit/rescan', async (req, res) => {
   }
 });
 
-/** 批量删除充币订单 */
+/** 批量删除充币订单（记录 txid 防止扫描器重建） */
 router.post('/deposit/batch-delete', (req, res) => {
   try {
     const { ids } = req.body;
     if (!ids || !ids.length) return res.json(error('缺少订单ID'));
-    const stmt = db.prepare('DELETE FROM deposit_order WHERE id = ?');
-    for (const id of ids) stmt.run(id);
+    const selectStmt = db.prepare('SELECT txid FROM deposit_order WHERE id = ?');
+    const insertDeleted = db.prepare('INSERT OR IGNORE INTO deleted_txid (txid, order_type) VALUES (?, ?)');
+    const deleteStmt = db.prepare('DELETE FROM deposit_order WHERE id = ?');
+    for (const id of ids) {
+      const row = selectStmt.get(id);
+      if (row?.txid) insertDeleted.run(row.txid, 'deposit');
+      deleteStmt.run(id);
+    }
     logService.write('operate', '充币', '批量删除', `删除 ${ids.length} 笔`, req.ip, req.admin.username);
     res.json(success(null, `已删除 ${ids.length} 笔`));
   } catch (err) { res.json(error(err.message)); }
@@ -517,6 +523,70 @@ router.get('/log/list', (req, res) => {
   const { page = 1, page_size = 20, ...filters } = req.query;
   const result = logService.list(page, page_size, filters);
   res.json(pageResult(result.list, result.total, page, page_size));
+});
+
+/** 实时日志文件列表 */
+router.get('/log/files', (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const logDir = path.resolve('./logs');
+    if (!fs.existsSync(logDir)) return res.json(success([]));
+    const files = fs.readdirSync(logDir)
+      .filter(f => f.endsWith('.log'))
+      .map(f => {
+        const stat = fs.statSync(path.join(logDir, f));
+        return { name: f, size: stat.size, mtime: stat.mtime.toISOString() };
+      })
+      .sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+    res.json(success(files));
+  } catch (err) {
+    res.json(error(err.message));
+  }
+});
+
+/** 读取指定日志文件（最新 N 行） */
+router.get('/log/read', (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const { file = 'combined.log', lines = 200, keyword = '' } = req.query;
+    const safeName = path.basename(file);
+    if (!safeName.endsWith('.log')) return res.json(error('仅支持 .log 文件'));
+    const logPath = path.join(path.resolve('./logs'), safeName);
+    if (!fs.existsSync(logPath)) return res.json(success({ file: safeName, lines: [], total: 0 }));
+
+    const content = fs.readFileSync(logPath, 'utf8');
+    let allLines = content.split('\n').filter(l => l.trim());
+    const total = allLines.length;
+    if (keyword) {
+      allLines = allLines.filter(l => l.toLowerCase().includes(keyword.toLowerCase()));
+    }
+    const result = allLines.slice(-parseInt(lines));
+    res.json(success({ file: safeName, lines: result, total, filtered: result.length }));
+  } catch (err) {
+    res.json(error(err.message));
+  }
+});
+
+/** 清空指定日志文件 */
+router.post('/log/clear', (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const { file } = req.body;
+    if (!file) return res.json(error('缺少文件名'));
+    const safeName = path.basename(file);
+    if (!safeName.endsWith('.log')) return res.json(error('仅支持 .log 文件'));
+    const logPath = path.join(path.resolve('./logs'), safeName);
+    if (fs.existsSync(logPath)) {
+      fs.writeFileSync(logPath, '');
+    }
+    logService.write('operate', '日志', '清空', `清空 ${safeName}`, req.ip, req.admin.username);
+    res.json(success(null, `已清空 ${safeName}`));
+  } catch (err) {
+    res.json(error(err.message));
+  }
 });
 
 // ========== 修改密码 ==========

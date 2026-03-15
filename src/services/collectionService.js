@@ -20,23 +20,29 @@ const runCollection = async (chainType, merchantId = 0) => {
   const sysMainTrc20 = configService.get('collection_main_address_trc20') || '';
   const sysMainBsc = configService.get('collection_main_address_bsc') || '';
 
-  // 归集前先刷新链上余额，避免使用过期的 DB 缓存导致少归集
+  logger.collection.info('开始执行', { chain: chainType, merchant: merchantId || '全部', threshold });
+
   const toRefresh = db.prepare(`
     SELECT address FROM wallet_address
     WHERE chain_type = ? AND status = 1 AND (is_main = 0 OR is_main IS NULL)
   `).all(chainType);
+
+  logger.collection.info('刷新子地址余额', { count: toRefresh.length, chain: chainType });
   for (const row of toRefresh) {
     try {
       await addressService.queryBalance(row.address);
     } catch (e) {
-      logger.warn('[归集] 刷新余额失败，使用缓存', { address: row.address, error: e.message });
+      logger.collection.warn('刷新余额失败，使用缓存', { address: row.address, error: e.message });
     }
   }
 
   const addresses = addressService.getAddressesWithBalance(chainType, threshold);
   if (addresses.length === 0) {
+    logger.collection.info('无可归集地址', { chain: chainType, threshold });
     return { success: true, message: '无可归集地址', count: 0, success_count: 0, fail_count: 0 };
   }
+
+  logger.collection.info('找到可归集地址', { chain: chainType, count: addresses.length });
 
   const itemsByMain = {};
   for (const a of addresses) {
@@ -59,12 +65,15 @@ const runCollection = async (chainType, merchantId = 0) => {
   let failCount = 0;
 
   for (const { mainAddr, items } of Object.values(itemsByMain)) {
+    logger.collection.info('归集目标', { mainAddr, subCount: items.length, chain: chainType });
     for (const item of items) {
       try {
         if (chainType === 'trc20') {
+          logger.chain.info('归集租赁能量', { from: item.from_address });
           await energyService.rentAndWait(item.from_address);
         }
         const privateKey = addressService.getPrivateKey(item.from_address);
+        logger.chain.info('归集链上转账', { from: item.from_address, to: mainAddr, amount: item.amount, chain: chainType });
         let txid;
         if (chainType === 'trc20') {
           txid = await chainModule.transferUSDT(privateKey, item.to_address, item.amount);
@@ -73,15 +82,16 @@ const runCollection = async (chainType, merchantId = 0) => {
         }
         successCount++;
         db.prepare(`UPDATE wallet_address SET balance = '0' WHERE address = ?`).run(item.from_address);
-        logger.info('[归集] 成功', { chainType, from: item.from_address, to: mainAddr, amount: item.amount, txid });
+        logger.collection.info('归集成功', { chain: chainType, from: item.from_address, to: mainAddr, amount: item.amount, txid });
       } catch (err) {
         failCount++;
-        logger.error('[归集] 失败', { chainType, from: item.from_address, to: mainAddr, amount: item.amount, error: err.message });
+        logger.collection.error('归集失败', { chain: chainType, from: item.from_address, to: mainAddr, amount: item.amount, error: err.message });
       }
     }
   }
 
   const totalCount = successCount + failCount;
+  logger.collection.info('归集批次完成', { chain: chainType, total: totalCount, success: successCount, fail: failCount });
   return {
     success: true,
     message: `归集完成，成功 ${successCount} 笔${failCount > 0 ? `，失败 ${failCount} 笔` : ''}`,

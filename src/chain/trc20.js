@@ -23,7 +23,21 @@ const getTronWeb = () => {
   return tronWebInstance;
 };
 
+const createFreshTronWeb = () => {
+  const configRow = db.prepare(`SELECT config_value FROM system_config WHERE config_key = ?`).get('trc20_rpc_url');
+  const fullHost = configRow?.config_value || process.env.TRON_FULL_HOST || 'https://api.trongrid.io';
+  return new TronWeb({
+    fullHost,
+    headers: { 'TRON-PRO-API-KEY': process.env.TRON_API_KEY || '' },
+  });
+};
+
 const resetInstance = () => { tronWebInstance = null; };
+
+const ensureFreshInstance = () => {
+  tronWebInstance = null;
+  return getTronWeb();
+};
 
 /**
  * 生成 TRC20 地址
@@ -94,56 +108,81 @@ const transferUSDT = async (privateKey, toAddress, amount) => {
   }
 };
 
-/**
- * 获取当前区块高度
- */
-const getCurrentBlock = async () => {
-  const tronWeb = getTronWeb();
-  const block = await tronWeb.trx.getCurrentBlock();
-  return block.block_header.raw_data.number;
+const getRpcConfig = () => {
+  const configRow = db.prepare(`SELECT config_value FROM system_config WHERE config_key = ?`).get('trc20_rpc_url');
+  const host = configRow?.config_value || process.env.TRON_FULL_HOST || 'https://api.trongrid.io';
+  const apiKey = process.env.TRON_API_KEY || '';
+  return { host, apiKey };
 };
 
 /**
- * 获取区块内 TRC20 USDT 转账记录
+ * 获取当前区块高度（纯 HTTP，绕过 TronWeb 的 readable-stream 兼容问题）
  */
-const getBlockTransfers = async (blockNumber) => {
-  const tronWeb = getTronWeb();
+const getCurrentBlock = async () => {
+  const { host, apiKey } = getRpcConfig();
+  const { data } = await axios.post(`${host}/wallet/getnowblock`, {}, {
+    headers: { 'TRON-PRO-API-KEY': apiKey },
+    timeout: 10000,
+  });
+  return data.block_header.raw_data.number;
+};
+
+/**
+ * 获取区块内 TRC20 USDT 转账记录（纯 HTTP + 限流重试）
+ */
+const getBlockTransfers = async (blockNumber, retries = 2) => {
   const contract = process.env.TRC20_USDT_CONTRACT || 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t';
+  const { host, apiKey } = getRpcConfig();
 
-  try {
-    const block = await tronWeb.trx.getBlock(blockNumber);
-    if (!block || !block.transactions) return [];
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const { data: block } = await axios.post(`${host}/wallet/getblockbynum`, { num: blockNumber }, {
+        headers: { 'TRON-PRO-API-KEY': apiKey },
+        timeout: 10000,
+      });
+      if (!block || !block.transactions) return [];
 
-    const transfers = [];
-    for (const tx of block.transactions) {
-      // ret 可能不存在（getBlock 部分节点不返回），仅在有 ret 且非成功时跳过
-      if (tx.ret && tx.ret[0] && tx.ret[0].contractRet !== 'SUCCESS') continue;
-      const contractData = tx.raw_data?.contract?.[0];
-      if (!contractData || contractData.type !== 'TriggerSmartContract') continue;
+      const transfers = [];
+      for (const tx of block.transactions) {
+        if (tx.ret && tx.ret[0] && tx.ret[0].contractRet !== 'SUCCESS') continue;
+        const contractData = tx.raw_data?.contract?.[0];
+        if (!contractData || contractData.type !== 'TriggerSmartContract') continue;
 
-      const { contract_address, data } = contractData.parameter.value;
-      const contractAddr = tronWeb.address.fromHex(contract_address);
-      if (contractAddr !== contract) continue;
+        const { contract_address, data } = contractData.parameter.value;
+        const contractAddr = TronWeb.address.fromHex(contract_address);
+        if (contractAddr !== contract) continue;
 
-      if (data && data.startsWith('a9059cbb')) {
-        const toHex = '41' + data.substring(32, 72);
-        const toAddress = tronWeb.address.fromHex(toHex);
-        const amountHex = data.substring(72, 136);
-        const amount = (parseInt(amountHex, 16) / 1e6).toString();
+        if (data && data.startsWith('a9059cbb')) {
+          const toHex = '41' + data.substring(32, 72);
+          const toAddress = TronWeb.address.fromHex(toHex);
+          const amountHex = data.substring(72, 136);
+          const amount = (parseInt(amountHex, 16) / 1e6).toString();
 
-        transfers.push({
-          txid: tx.txID,
-          toAddress,
-          amount,
-          blockNumber,
-        });
+          transfers.push({
+            txid: tx.txID,
+            toAddress,
+            amount,
+            blockNumber,
+          });
+        }
       }
+      return transfers;
+    } catch (err) {
+      const isRetriable = err.message?.includes('429') || err.response?.status === 429
+        || err.message?.includes('write after end') || err.message?.includes('ECONNRESET');
+      if (isRetriable && attempt < retries) {
+        const wait = (attempt + 1) * 2000;
+        logger.chain.warn('TRC20 扫描重试', { blockNumber, attempt: attempt + 1, waitMs: wait, error: err.message });
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      if (attempt === retries) {
+        logger.chain.error('TRC20 区块扫描失败', { blockNumber, error: err.message });
+      }
+      return [];
     }
-    return transfers;
-  } catch (err) {
-    logger.error('[TRC20] 区块扫描失败', { blockNumber, error: err.message });
-    return [];
   }
+  return [];
 };
 
 /**
@@ -170,4 +209,5 @@ module.exports = {
   getBlockTransfers,
   getTransactionConfirmations,
   resetInstance,
+  ensureFreshInstance,
 };

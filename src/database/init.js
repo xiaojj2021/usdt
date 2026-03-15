@@ -156,6 +156,14 @@ async function main() {
       last_block INTEGER DEFAULT 0,
       update_time TEXT DEFAULT (datetime('now','localtime'))
     );
+
+    -- 已删除交易记录（防止扫描器重新创建已删除的充币订单）
+    CREATE TABLE IF NOT EXISTS deleted_txid (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      txid TEXT UNIQUE NOT NULL,
+      order_type TEXT DEFAULT 'deposit',
+      deleted_at TEXT DEFAULT (datetime('now','localtime'))
+    );
   `);
 
   console.log('[数据库] 所有表创建完成');
